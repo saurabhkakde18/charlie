@@ -38,16 +38,28 @@ def _is_strictly_whitelisted(cmd: str) -> bool:
     return False
 
 
-def _execute(cmd: str) -> str:
+def _execute(cmd: str, player=None) -> str:
+    import sys
+    actual_cmd = cmd
+    lower = cmd.strip().lower()
+    # If command targets pip or python, route through current python interpreter so virtual environments work
+    if lower.startswith("pip "):
+        actual_cmd = f'"{sys.executable}" -m ' + cmd.strip()
+    elif lower.startswith("python "):
+        actual_cmd = f'"{sys.executable}" ' + cmd.strip()[7:]
+
+    # Allow longer timeout for installs / package management
+    timeout = 180.0 if "pip install" in lower else 30.0
+
     try:
         res = subprocess.run(
-            cmd,
+            actual_cmd,
             shell=True,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=15.0,
+            timeout=timeout,
         )
         out = (res.stdout or "").strip()
         err = (res.stderr or "").strip()
@@ -55,11 +67,28 @@ def _execute(cmd: str) -> str:
         # Truncate if too long
         if len(combined) > 1500:
             combined = combined[:1500] + "\n... (truncated)"
+        if player:
+            try:
+                player.show_content(f"Shell: {cmd}", combined)
+            except Exception:
+                pass
         return combined
     except subprocess.TimeoutExpired:
-        return f"Command '{cmd}' timed out after 15 seconds."
+        msg = f"Command '{cmd}' timed out after {int(timeout)} seconds."
+        if player:
+            try:
+                player.show_content("Shell Timeout", msg)
+            except Exception:
+                pass
+        return msg
     except Exception as e:
-        return f"Command execution error: {e}"
+        msg = f"Command execution error: {e}"
+        if player:
+            try:
+                player.show_content("Shell Error", msg)
+            except Exception:
+                pass
+        return msg
 
 
 PLUGIN = {
@@ -84,9 +113,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         return "Please provide a command to run."
 
     if _is_strictly_whitelisted(cmd):
-        result = _execute(cmd)
-        if player:
-            player.show_content(f"Shell: {cmd}", result)
+        result = _execute(cmd, player=player)
         return f"Output:\n{result}"
 
     # Outside whitelist -> Mandatory Confirmation Gate
@@ -95,6 +122,6 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         key=f"shell_{cmd[:30]}",
         title="Approve Shell Command",
         detail=f"Charlie is requesting to run:\n\n{cmd}\n\nApprove execution?",
-        run=lambda: _execute(cmd),
+        run=lambda: _execute(cmd, player=player),
     )
 
