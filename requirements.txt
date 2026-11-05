@@ -49,13 +49,14 @@ mss>=9,<11
 # ── System, files & documents ─────────────────────────────────────────────────
 psutil>=5.9,<8
 send2trash                   # file_controller — recoverable deletes
-python-pptx                  # file_processor — presentation reading
+python-pptx
+keyring>=24.0.0                  # file_processor — presentation reading
 
 # ── Remote dashboard (control from your phone) ────────────────────────────────
 fastapi>=0.110,<1
 uvicorn[standard]>=0.27,<1
-cryptography>=42,<50
-python-multipart>=0.0.9,<1
+cryptography>=42
+python-multipart>=0.0.9
 qrcode[pil]>=7,<9
 
 # ── Plugin extras ─────────────────────────────────────────────────────────────

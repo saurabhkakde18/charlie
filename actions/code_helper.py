@@ -22,8 +22,8 @@ from core import gemini
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from core.credentials import get_gemini_api_key
+    return get_gemini_api_key()
 
 
 def _get_gemini(tier: str = gemini.SMART):
@@ -376,13 +376,19 @@ Explanation:"""
 
 def _run_action(file_path, args, timeout, player) -> str:
     if not file_path:
-        return "Please provide a file path to run, sir."
+        return "Please provide a file path to run."
     p = Path(file_path)
     if not p.exists():
         return f"File not found: {file_path}"
-    if player:
-        player.write_log(f"[Code] Running {p.name}...")
-    return _run_file(p, args, timeout)
+    from core import confirm
+    if confirm.pending_title():
+        return "There is already a confirmation pending on screen."
+    return confirm.request(
+        key=f"run-{p.name}",
+        title=f"Run '{p.name}'",
+        detail=f"Execute {p.name} with args: {args or 'none'}",
+        run=lambda: _run_file(p, args, timeout),
+    )
 
 
 def _optimize_action(file_path, code, language, output_path, player) -> str:

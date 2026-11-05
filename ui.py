@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import sys
+# Force UTF-8 console output so emojis and non-Latin text never raise UnicodeEncodeError
+for _stream in ("stdout", "stderr"):
+    try:
+        _s = getattr(sys, _stream, None)
+        if _s is not None and hasattr(_s, "reconfigure"):
+            _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import json
 import math
 import os
 import platform
 import random
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
@@ -7159,10 +7168,19 @@ class MainWindow(QMainWindow):
         self.hud.speaking = (state == "SPEAKING")
 
     def _check_config(self) -> bool:
-        if not API_FILE.exists(): return False
         try:
-            d = json.loads(API_FILE.read_text(encoding="utf-8"))
-            return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))
+            from core.credentials import has_valid_key
+            if not has_valid_key():
+                return False
+            if API_FILE.exists():
+                d = json.loads(API_FILE.read_text(encoding="utf-8"))
+                if not d.get("os_system"):
+                    d["os_system"] = platform.system().lower()
+                    API_FILE.write_text(json.dumps(d, indent=4), encoding="utf-8")
+            else:
+                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                API_FILE.write_text(json.dumps({"os_system": platform.system().lower()}, indent=4), encoding="utf-8")
+            return True
         except Exception:
             return False
 
@@ -7180,17 +7198,20 @@ class MainWindow(QMainWindow):
         self._overlay = ov
 
     def _on_setup_done(self, key: str, os_name: str):
-        os.makedirs(CONFIG_DIR, exist_ok=True)
-        API_FILE.write_text(
-            json.dumps({"gemini_api_key": key, "os_system": os_name}, indent=4),
-            encoding="utf-8",
-        )
+        from core.credentials import save_gemini_api_key
+        save_gemini_api_key(key, use_keyring=True)
+        try:
+            d = json.loads(API_FILE.read_text(encoding="utf-8")) if API_FILE.exists() else {}
+        except Exception:
+            d = {}
+        d["os_system"] = os_name
+        API_FILE.write_text(json.dumps(d, indent=4), encoding="utf-8")
         self._ready = True
         if self._overlay:
             self._overlay.hide()
             self._overlay = None
         self._apply_state("LISTENING")
-        self._assistant_name = _read_full_config().get("assistant_name", "JARVIS") or "JARVIS"
+        self._assistant_name = _read_full_config().get("assistant_name", "Charlie") or "Charlie"
         self._log.append_log(f"SYS: Initialised. OS={os_name.upper()}. {self._assistant_name} online.")
 
 

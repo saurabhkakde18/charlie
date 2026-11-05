@@ -26,8 +26,8 @@ MODEL_PLANNER    = gemini.SMART
 MODEL_WRITER     = gemini.SMART
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from core.credentials import get_gemini_api_key
+    return get_gemini_api_key()
 
 
 def _coding_provider() -> str:

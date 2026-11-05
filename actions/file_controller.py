@@ -11,6 +11,7 @@ except ImportError:
     _SEND2TRASH = False
 
 from core.undo import push_undo
+from core import confirm
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
@@ -90,18 +91,26 @@ def _restore_from_trash(original: Path) -> str:
             f"automatically, but it is there and can be restored by hand.")
 
 
-_SAFE_ROOTS: list[Path] = [
-    Path.home(),
+_CRITICAL_SYSTEM_DIRS: list[str] = [
+    "C:\\Windows",
+    "C:\\Program Files",
+    "C:\\Program Files (x86)",
+    "C:\\ProgramData",
+    "/etc", "/bin", "/sbin", "/usr", "/boot", "/sys", "/proc", "/root"
 ]
 
 def _is_safe_path(target: Path) -> bool:
-    """Is the given path inside _SAFE_ROOTS? If not, reject the operation."""
+    """Ensure path is not an OS system root or system directory across all drives."""
     try:
         resolved = target.resolve()
-        return any(
-            resolved == root.resolve() or resolved.is_relative_to(root.resolve())
-            for root in _SAFE_ROOTS
-        )
+        if resolved == resolved.parent:
+            return False
+        str_path = str(resolved).lower()
+        for sys_dir in _CRITICAL_SYSTEM_DIRS:
+            s_low = sys_dir.lower()
+            if str_path == s_low or str_path.startswith(s_low + os.sep) or str_path.startswith(s_low + "/"):
+                return False
+        return True
     except Exception:
         return False
 
@@ -284,11 +293,22 @@ def delete_file(path: str, name: str = "") -> str:
             return f"Protected directory, cannot delete: {target.name}"
 
         original = target.resolve()
-        result   = _safe_trash(target)
-        if result.startswith("Moved to Trash"):
-            push_undo(f"deleted {original.name}",
-                      lambda p=original: _restore_from_trash(p))
-        return result
+        def _do_delete():
+            result = _safe_trash(target)
+            if result.startswith("Moved to Trash"):
+                push_undo(f"deleted {original.name}",
+                          lambda p=original: _restore_from_trash(p))
+            return result
+
+        if confirm.pending_title():
+            return "There is already a confirmation waiting on screen. Please answer that first."
+
+        return confirm.request(
+            key=f"delete-{original.name}",
+            title=f"Delete '{original.name}'",
+            detail=f"Move '{original}' to Trash.",
+            run=_do_delete,
+        )
 
     except PermissionError:
         return f"Permission denied: {path}"

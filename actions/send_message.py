@@ -344,17 +344,24 @@ def send_message(
     if player:
         player.write_log(f"[msg] {platform} → {receiver}")   # the message itself IS the news
 
-    threading.Thread(
-        target=_send_and_report,
-        args=(player, platform, receiver, message_text),
-        daemon=True, name="send-message",
-    ).start()
+    from core import confirm
+    if confirm.pending_title():
+        return outcome.ask("send_message", "A confirmation is already waiting on screen.")
 
-    # Sending opens an application, searches for a person and types — several
-    # seconds during which the old code held the whole conversation still. The
-    # answer goes out now and the result follows, which is the shape
-    # whatsapp_call.py settled on for the same reason.
-    return outcome.started("send_message", platform=platform, to=receiver)
+    def _do_send():
+        threading.Thread(
+            target=_send_and_report,
+            args=(player, platform, receiver, message_text),
+            daemon=True, name="send-message",
+        ).start()
+        return f"Sending {platform} message to {receiver}."
+
+    return confirm.request(
+        key=f"send-{platform}-{receiver}",
+        title=f"Send {platform.title()} message to {receiver}",
+        detail=f"Message: {preview}",
+        run=_do_send,
+    )
 
 
 def _send_and_report(player, platform: str, receiver: str,

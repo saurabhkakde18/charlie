@@ -74,9 +74,9 @@ UPLOADS_DIR = _make_uploads_dir()
 
 def _get_gemini_key() -> str | None:
     try:
-        import json as _json
-        with open(BASE_DIR / "config" / "api_keys.json", "r", encoding="utf-8") as f:
-            return _json.load(f).get("gemini_api_key")
+        from core.credentials import get_gemini_api_key
+        k = get_gemini_api_key()
+        return k if k else None
     except Exception:
         return None
 
@@ -1149,9 +1149,9 @@ class DashboardServer:
             tok = token.strip()
             if not _valid(tok):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
-            safe = re.sub(r'[/\\]', '', filename)
-            path = self._uploads_dir / safe
-            if not path.exists() or not path.is_file():
+            safe = Path(filename).name
+            path = (self._uploads_dir / safe).resolve()
+            if not path.is_relative_to(self._uploads_dir.resolve()) or not path.is_file():
                 return JSONResponse({"error": "Not found"}, status_code=404)
             return FileResponse(str(path), filename=safe)
 
