@@ -175,3 +175,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         run=_approve_and_install,
     )
 
+
+TOOL["handler"] = run
+
+
