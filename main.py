@@ -1766,6 +1766,16 @@ class JarvisLive:
                                 full_in = " ".join(in_buf).strip()
                                 if full_in:
                                     self._last_out_logged = ""   # new exchange
+                                    # Multilingual override detection
+                                    _override = i18n.detect_language_override(full_in)
+                                    if _override:
+                                        _lcode, _lname = _override
+                                        i18n.set_active_language(_lcode)
+                                        try:
+                                            update_memory("identity", "language", _lname)
+                                            print(f"[CHARLIE] 🌐 Preferred language set to {_lname} ({_lcode})")
+                                        except Exception:
+                                            pass
                                     self.ui.write_log(f"You: {full_in}")
                                     self._session_log.append(f"User: {full_in}")
                                     if self._dashboard:
