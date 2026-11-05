@@ -247,9 +247,15 @@ def _nvml_gpu_windows() -> float:
             return float(pynvml.nvmlDeviceGetUtilizationRates(h).gpu)
 
         dev = ctypes.c_void_p()
-        _nvml_lib.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(dev))
+        ret = _nvml_lib.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(dev))
+        if ret != 0 or not dev.value:
+            _nvml_ok = False
+            return -1.0
         util = _Util()
-        _nvml_lib.nvmlDeviceGetUtilizationRates(dev, ctypes.byref(util))
+        ret_rate = _nvml_lib.nvmlDeviceGetUtilizationRates(dev, ctypes.byref(util))
+        if ret_rate != 0:
+            _nvml_ok = False
+            return -1.0
         _nvml_ok = True
         return float(util.gpu)
     except Exception:
@@ -353,14 +359,19 @@ class _SysMetrics:
             if self._nv_unix is None:
                 _lib = "libnvidia-ml.so.1" if _OS == "Linux" else "libnvidia-ml.dylib"
                 nv = ctypes.CDLL(_lib)
-                nv.nvmlInit_v2()
+                if nv.nvmlInit_v2() != 0:
+                    return -1.0
                 dev = ctypes.c_void_p()
-                nv.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(dev))
+                if nv.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(dev)) != 0 or not dev.value:
+                    return -1.0
                 self._nv_unix = (nv, dev)
 
             nv, dev = self._nv_unix
+            if not dev or not dev.value:
+                return -1.0
             u = _Util()
-            nv.nvmlDeviceGetUtilizationRates(dev, ctypes.byref(u))
+            if nv.nvmlDeviceGetUtilizationRates(dev, ctypes.byref(u)) != 0:
+                return -1.0
             return float(u.gpu)
         except Exception:
             pass
@@ -386,6 +397,11 @@ class _SysMetrics:
         # connection each time and is very slow. Give up after one failure.
         if _OS == "Windows" and self._wmi_ok is not False:
             try:
+                try:
+                    import pythoncom
+                    pythoncom.CoInitialize()
+                except Exception:
+                    pass
                 if self._wmi_conn is None:
                     import wmi  # type: ignore
                     self._wmi_conn = wmi.WMI(namespace="root/wmi")
@@ -6733,7 +6749,7 @@ class MainWindow(QMainWindow):
                               else "◉  HUD: REACTOR CORE")
         self._hud_btn.setStyleSheet(style)
         self._hud_btn.setToolTip(
-            "An animated head that speaks your words and shows what JARVIS is "
+            f"An animated head that speaks your words and shows what {self._assistant_name} is "
             "doing. Tap to switch to the reactor core."
             if face else
             "A reactor core that turns with the state and moves with your voice. "

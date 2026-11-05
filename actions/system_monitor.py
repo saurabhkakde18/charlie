@@ -59,9 +59,15 @@ def _nvml_gpu() -> float:
             return -1.0
 
         dev = ctypes.c_void_p()
-        _nvml_lib.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(dev))
+        ret = _nvml_lib.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(dev))
+        if ret != 0 or not dev.value:
+            _nvml_ok = False
+            return -1.0
         u = _Util()
-        _nvml_lib.nvmlDeviceGetUtilizationRates(dev, ctypes.byref(u))
+        ret_rate = _nvml_lib.nvmlDeviceGetUtilizationRates(dev, ctypes.byref(u))
+        if ret_rate != 0:
+            _nvml_ok = False
+            return -1.0
         _nvml_ok = True
         return float(u.gpu)
     except Exception:
@@ -99,6 +105,11 @@ def _get_cpu_temp() -> float:
     # Windows: wmi module (pure Python COM, zero subprocess)
     if _OS == "Windows":
         try:
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+            except Exception:
+                pass
             import wmi  # type: ignore
             w = wmi.WMI(namespace="root/wmi")
             tz = w.MSAcpi_ThermalZoneTemperature()
