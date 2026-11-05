@@ -52,8 +52,8 @@ def is_configured() -> bool:
 
 
 def get_assistant_name() -> str:
-    """Return the configured assistant name, or 'JARVIS' if not set."""
-    return load_api_keys().get("assistant_name", "JARVIS") or "JARVIS"
+    """Return the configured assistant name, or 'Charlie' if not set."""
+    return load_api_keys().get("assistant_name", "Charlie") or "Charlie"
 
 
 def get_user_name() -> str:
@@ -70,9 +70,29 @@ def save_assistant_config(assistant_name: str, user_name: str) -> None:
             data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except Exception:
             data = {}
-    data["assistant_name"] = assistant_name.strip() or "JARVIS"
+    data["assistant_name"] = assistant_name.strip() or "Charlie"
     data["user_name"] = user_name.strip()
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+
+
+def get_wake_word_model() -> str:
+    """Return the configured wake word model identifier, default 'hey_charlie'."""
+    return load_api_keys().get("wake_word_model", "hey_charlie") or "hey_charlie"
+
+
+def save_wake_word_model(model: str) -> None:
+    """Persist the configured wake word model identifier."""
+    _save_flag("wake_word_model", (model or "hey_charlie").strip())
+
+
+def get_wake_word_phrase() -> str:
+    """Return the configured wake word phrase, default 'Hey Charlie'."""
+    return load_api_keys().get("wake_word_phrase", "Hey Charlie") or "Hey Charlie"
+
+
+def save_wake_word_phrase(phrase: str) -> None:
+    """Persist the wake word display phrase."""
+    _save_flag("wake_word_phrase", (phrase or "Hey Charlie").strip())
 
 
 # ── Assistant voice ──────────────────────────────────────────────────────────

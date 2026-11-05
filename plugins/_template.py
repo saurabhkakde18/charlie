@@ -1,8 +1,8 @@
 """
-Drop-in JARVIS plugin template.
+Drop-in Charlie plugin template.
 
 Copy this file, rename it (no leading underscore), fill in PLUGIN and run().
-No other file needs to change — JARVIS discovers this automatically at startup.
+No other file needs to change — Charlie discovers this automatically at startup.
 
 ONE RULE IF YOUR PLUGIN NEEDS TO ASK A MODEL SOMETHING
     Go through `core.gemini`. Never build your own `genai.Client`.
@@ -58,7 +58,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         return f"Sir, my_plugin failed: {e}"
     if player:
         try:
-            player.write_log(f"JARVIS: {result_text}")
+            player.write_log(f"Charlie: {result_text}")
         except Exception:
             pass
     return result_text

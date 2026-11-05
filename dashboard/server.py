@@ -58,8 +58,8 @@ MAX_UPLOAD_MB = 500
 def _make_uploads_dir() -> Path:
     """Return (and create) the cross-platform uploads folder."""
     for candidate in [
-        Path.home() / "Downloads" / "JARVIS Uploads",
-        Path.home() / "Documents" / "JARVIS Uploads",
+        Path.home() / "Downloads" / "Charlie Uploads",
+        Path.home() / "Documents" / "Charlie Uploads",
         BASE_DIR / "uploads",
     ]:
         try:
@@ -263,8 +263,8 @@ def _ensure_network_access(*ports: int) -> None:
         # elevation once per port — two UAC dialogs for one dashboard, and two
         # racing .bat files whose output interleaved into contradictory
         # messages on the console.
-        port_rules = {pt: f"JARVIS Dashboard Port {pt}" for pt in ports}
-        prog_rule  = "JARVIS Dashboard Python"
+        port_rules = {pt: f"Charlie Dashboard Port {pt}" for pt in ports}
+        prog_rule  = "Charlie Dashboard Python"
 
         # BOTH interpreters, because the app runs under either one.
         #
@@ -371,7 +371,7 @@ def _ensure_network_access(*ports: int) -> None:
         # Say what will be attempted, so a UAC prompt nobody expected has a
         # reason attached to it in the terminal.
         if blocked:
-            print("[Dashboard] The Windows prompt about to appear is JARVIS "
+            print("[Dashboard] The Windows prompt about to appear is Charlie "
                   "removing those block rules. Declining it leaves the phone "
                   "dashboard unreachable, and nothing else is affected.")
 
@@ -442,7 +442,7 @@ def _ensure_network_access(*ports: int) -> None:
                           "until this is done: Windows has block rules for "
                           + ", ".join(sorted({n for n, _ in blocked}))
                           + " which override every allow rule.")
-                    print("[Dashboard] Either restart JARVIS and accept the "
+                    print("[Dashboard] Either restart Charlie and accept the "
                           "prompt, or delete those rules in Windows Defender "
                           "Firewall > Inbound Rules.")
                 else:
@@ -612,7 +612,7 @@ def _ensure_certs() -> bool:
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
         who = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, "JARVIS Dashboard"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "Charlie Dashboard"),
             x509.NameAttribute(NameOID.ORGANIZATION_NAME, "JARVIS"),
         ])
 
@@ -931,7 +931,7 @@ class DashboardServer:
   h2{color:#f87171;margin-bottom:12px}p{color:#5e6a7e;font-size:14px}
 </style></head>
 <body><div><h2>Link Expired</h2>
-<p>Press <strong style="color:#dde3ed">Remote Control</strong> in JARVIS to get a new QR code.</p>
+<p>Press <strong style="color:#dde3ed">Remote Control</strong> in Charlie to get a new QR code.</p>
 </div></body></html>""")
 
             del self._pending_keys[key]
@@ -962,7 +962,7 @@ class DashboardServer:
   localStorage.setItem('jarvis_device_token','{dev_tok}');
   setTimeout(function(){{location.replace('/')}},400);
 </script>
-<p>Connecting to JARVIS…</p>
+<p>Connecting to Charlie…</p>
 </body></html>""")
 
         @app.post("/api/device-login")
@@ -1300,7 +1300,7 @@ class DashboardServer:
             _probe.close()
             self._bind_error = (
                 f"port {SECURE_PORT if use_ssl else PORT} is already in use — "
-                f"another copy of JARVIS is probably running. Close it and "
+                f"another copy of Charlie is probably running. Close it and "
                 f"restart, or the phone dashboard will stay unreachable "
                 f"({exc.__class__.__name__})")
             print(f"[Dashboard] {self._bind_error}")
@@ -1308,5 +1308,5 @@ class DashboardServer:
         _probe.close()
 
         print(f"[Dashboard] {self.get_url()}")
-        print("[Dashboard] Press 'Remote Control' in JARVIS UI to get the QR code.")
+        print("[Dashboard] Press 'Remote Control' in Charlie UI to get the QR code.")
         await uvicorn.Server(cfg).serve()
