@@ -30,45 +30,57 @@ BASE_DIR = _get_base_dir()
 CONFIG_DIR = BASE_DIR / "config"
 API_CONFIG_PATH = CONFIG_DIR / "api_keys.json"
 
+_cached_key: Optional[str] = None
 
-def get_gemini_api_key() -> str:
-    """Retrieve Gemini API key from environment, keyring, or config file."""
-    # 1. Environment variables
+
+def get_gemini_api_key(force_refresh: bool = False) -> str:
+    """Retrieve Gemini API key from environment, config file, or OS keyring."""
+    global _cached_key
+    if _cached_key and not force_refresh:
+        return _cached_key
+
+    # 1. Environment variables (highest priority, instantaneous)
     env_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if env_key and env_key.strip():
-        return env_key.strip()
+        _cached_key = env_key.strip()
+        return _cached_key
 
-    # 2. OS Keyring
-    try:
-        import keyring
-        k_key = keyring.get_password(KEYRING_SERVICE, KEYRING_USERNAME)
-        if k_key and k_key.strip():
-            return k_key.strip()
-        # Fallback to legacy service name if present
-        legacy_key = keyring.get_password(LEGACY_KEYRING_SERVICE, KEYRING_USERNAME)
-        if legacy_key and legacy_key.strip():
-            return legacy_key.strip()
-    except Exception:
-        pass
-
-    # 3. Fallback: config/api_keys.json
+    # 2. Local config/api_keys.json (fast file read)
     if API_CONFIG_PATH.exists():
         try:
             data = json.loads(API_CONFIG_PATH.read_text(encoding="utf-8"))
             file_key = str(data.get("gemini_api_key") or "").strip()
             if file_key:
-                return file_key
+                _cached_key = file_key
+                return _cached_key
         except Exception:
             pass
+
+    # 3. OS Keyring (slower on Windows, queried if not in env or config)
+    try:
+        import keyring
+        k_key = keyring.get_password(KEYRING_SERVICE, KEYRING_USERNAME)
+        if k_key and k_key.strip():
+            _cached_key = k_key.strip()
+            return _cached_key
+        # Fallback to legacy service name if present
+        legacy_key = keyring.get_password(LEGACY_KEYRING_SERVICE, KEYRING_USERNAME)
+        if legacy_key and legacy_key.strip():
+            _cached_key = legacy_key.strip()
+            return _cached_key
+    except Exception:
+        pass
 
     return ""
 
 
 def save_gemini_api_key(key: str, use_keyring: bool = True) -> bool:
     """Store Gemini API key in OS keyring with config fallback."""
+    global _cached_key
     key = key.strip()
     if not key:
         return False
+    _cached_key = key
 
     saved_in_keyring = False
     if use_keyring:
