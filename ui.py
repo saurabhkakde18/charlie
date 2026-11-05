@@ -70,6 +70,19 @@ try:
 except Exception:      # pragma: no cover — HUD must never die over cosmetics
     HoloAvatar = None
 
+try:
+    from core.i18n import t
+except Exception:
+    def t(key: str, **kwargs) -> str:
+        _d = {
+            "status_listening": "LISTENING",
+            "status_thinking": "THINKING",
+            "status_speaking": "SPEAKING",
+            "status_asleep": "ASLEEP",
+            "status_muted": "MUTED",
+        }
+        return _d.get(key, key)
+
 
 def _base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -866,8 +879,17 @@ class HudCanvas(QWidget):
 
     def paintEvent(self, _):
         p = QPainter(self)
-        if not p.isActive():      # device not ready (e.g. 0-size during layout) — skip cleanly
+        if not p.isActive():
             return
+        try:
+            self._render_hud(p)
+        except Exception:
+            pass
+        finally:
+            if p.isActive():
+                p.end()
+
+    def _render_hud(self, p: QPainter):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.fillRect(self.rect(), qcol(C.BG))
 
@@ -933,6 +955,9 @@ class HudCanvas(QWidget):
         elif self.state == "LISTENING":
             sym = "●" if self._blink else "○"
             txt, col = f"{sym}  {t('status_listening')}",  qcol(C.GREEN)
+        elif self.state in ("SLEEPING", "ASLEEP"):
+            sym = "○"
+            txt, col = f"{sym}  {t('status_asleep')}", qcol(C.PRI_DIM)
         else:
             sym = "●" if self._blink else "○"
             txt, col = f"{sym}  {self.state}", qcol(C.PRI)
@@ -963,7 +988,7 @@ class HudCanvas(QWidget):
                     cl = qcol(C.BORDER_B)
             p.fillRect(QRectF(wx0 + i * bw, wy + 20 - hgt, bw - 1, hgt), cl)
 
-        p.end()   # end deterministically so the backing store never flushes an active painter
+
 
 class MetricBar(QWidget):
 

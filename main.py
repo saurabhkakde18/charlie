@@ -80,6 +80,7 @@ from memory.config_manager     import (
 )
 from core                     import gemini as _gemini
 from core.plugin_loader        import discover_plugins
+from core                      import i18n
 from core                      import undo as undo_stack
 from core                      import confirm as confirm_gate
 from core                      import audio_devices
