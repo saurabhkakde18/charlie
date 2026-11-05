@@ -340,7 +340,7 @@ def _load_system_prompt() -> str:
         return PROMPT_PATH.read_text(encoding="utf-8")
     except Exception:
         return (
-            "You are JARVIS, Tony Stark's AI assistant. "
+            "You are Charlie, an advanced personal AI voice assistant. "
             "Be concise, direct, and always use the provided tools to complete tasks. "
             "Never simulate or guess results — always call the appropriate tool."
         )
@@ -419,7 +419,7 @@ TOOL_DECLARATIONS = [
         "name": "manage_monitor",
         "description": (
             "Add, remove, or list background monitoring topics. "
-            "JARVIS checks these topics once a day and alerts the user when there is a new development. "
+            "Charlie checks these topics once a day and alerts the user when there is a new development. "
             "Use 'add' when the user says 'monitor X', 'track X', 'follow X'. "
             "Use 'remove' when the user says 'stop monitoring X'. "
             "Use 'list' when the user asks what is being monitored. "
@@ -755,7 +755,7 @@ class JarvisLive:
         self._awake = False
         self.set_speaking(False)
         self.ui.set_state("SLEEPING")
-        self.ui.write_log(f"SYS: Sleeping — {reason}. Say 'Hey Jarvis' to wake me.")
+        self.ui.write_log(f"SYS: Sleeping — {reason}. Say 'Hey Charlie' or tap WAKE NOW.")
 
     async def _run_sleep_watch(self) -> None:
         """Auto-sleep after the configured silence window (wake-word mode only)."""
@@ -975,7 +975,7 @@ class JarvisLive:
         # asleep either (the sleep gate is not just for the mic). Wake first with
         # "Hey Jarvis" or the WAKE NOW button.
         if self._wake_enabled and not self._awake:
-            self.ui.write_log("SYS: I'm asleep — say 'Hey Jarvis' or tap WAKE NOW first.")
+            self.ui.write_log("SYS: I'm asleep — say 'Hey Charlie' or tap WAKE NOW first.")
             return
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
@@ -2526,11 +2526,11 @@ class JarvisLive:
                         self._ensure_wake_detector()
                         self._awake = False
                         self.ui.set_state("SLEEPING")
-                        self.ui.write_log("SYS: JARVIS online — sleeping. Say 'Hey Jarvis' to wake me.")
+                        self.ui.write_log("SYS: Charlie online — sleeping. Say 'Hey Charlie' to wake me.")
                     else:
                         self._awake = True
                         self.ui.set_state("LISTENING")
-                        self.ui.write_log("SYS: JARVIS online.")
+                        self.ui.write_log("SYS: Charlie online.")
 
                     # What this machine will not permit, said once, on screen.
                     #
@@ -2716,12 +2716,22 @@ def main():
     ui = JarvisUI("face.png")
 
     def runner():
-        ui.wait_for_api_key()
-        jarvis = JarvisLive(ui)
         try:
-            asyncio.run(jarvis.run())
-        except KeyboardInterrupt:
-            print("\n🔴 Shutting down...")
+            ui.wait_for_api_key()
+            jarvis = JarvisLive(ui)
+            while True:
+                try:
+                    asyncio.run(jarvis.run())
+                except KeyboardInterrupt:
+                    print("\n🔴 Shutting down...")
+                    break
+                except Exception as ex:
+                    logger.exception(f"Unhandled exception in Charlie live session: {ex}")
+                    print(f"[CHARLIE] Session exited unexpectedly: {ex}. Reconnecting in 5s...")
+                    time.sleep(5)
+        except Exception as e:
+            logger.exception(f"Fatal startup error in Charlie runner: {e}")
+            print(f"[CHARLIE] Fatal startup error: {e}")
 
     threading.Thread(target=runner, daemon=True).start()
     ui.root.mainloop()
