@@ -71,3 +71,4 @@ def test_computer_settings_brightness_dispatch():
 
     # Restore to 100%
     brightness_set(100)
+
