@@ -162,6 +162,8 @@ restart, shutdown and toggle_wifi put a button on the user's screen and do NOT
 happen until they press it. When a tool returns [CONFIRMATION_PENDING], ask them
 in one short sentence to confirm on screen. Never say it is done — it is not.
 Only call shutdown_charlie (or shutdown_jarvis) when the user explicitly ends the session.
+To set or change the desktop wallpaper, always use desktop_control with action='wallpaper' (or 'wallpaper_url'). Never generate or run a code script to set wallpaper.
+To adjust brightness or volume, use computer_settings with action='brightness_set' (percentage 0-100 in value), 'brightness_up', 'brightness_down', or 'volume_set'.
 
 [TAGGED MESSAGES]
 These arrive from the application, not the user. Never read the tag aloud.

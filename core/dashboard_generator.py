@@ -661,7 +661,8 @@ def create_and_open_dashboard(
         import tempfile
         fallback_dir = Path(tempfile.gettempdir()) / "charlie_dashboards"
         fallback_dir.mkdir(parents=True, exist_ok=True)
-        output_path = fallback_dir / output_path.name
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = fallback_dir / f"{output_path.stem}_{ts}.html"
         output_path.write_text(html_content, encoding="utf-8")
 
     if auto_open:

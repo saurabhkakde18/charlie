@@ -11,6 +11,7 @@ import io
 import json
 import os
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -120,6 +121,13 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
 
     dash_stem = Path(file_path).stem if file_path else "data"
     output_html_path = out_dir / f"{dash_stem}_dashboard.html"
+    try:
+        if output_html_path.exists():
+            with open(output_html_path, "a"):
+                pass
+    except (PermissionError, OSError):
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_html_path = out_dir / f"{dash_stem}_dashboard_{ts}.html"
 
     try:
         saved_path, summary = create_and_open_dashboard(

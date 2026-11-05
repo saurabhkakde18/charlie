@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import platform
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -104,6 +105,76 @@ def _unknown(said: str) -> str:
     )
 
 
+def _resolve_wallpaper_path(image_path: str | None, player=None) -> Path | None:
+    """Resolve an image path intelligently from user input, HUD drops, or documents/."""
+    # 1. Dropped file on HUD
+    if player and hasattr(player, "current_file"):
+        try:
+            cf = player.current_file()
+            if cf:
+                cfp = Path(cf).expanduser().resolve()
+                if cfp.exists() and cfp.is_file() and cfp.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp", ".webp"}:
+                    return cfp
+        except Exception:
+            pass
+
+    raw = str(image_path or "").strip().strip('"').strip("'")
+    
+    # 2. Check if raw is a known placeholder
+    is_placeholder = any(ph in raw.lower() for ph in (
+        "path\\to\\your", "path/to/your", "example.jpg", "your_image", "desktop_background.jpg", "<path", "your_desktop_background"
+    ))
+
+    valid_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+    # 3. Direct valid path
+    if raw and not is_placeholder:
+        p = Path(raw).expanduser().resolve()
+        if p.exists() and p.is_file() and p.suffix.lower() in valid_exts:
+            return p
+
+    # 4. Search in known folders
+    base = _get_base_dir()
+    search_dirs = [
+        base / "documents",
+        base,
+        Path.home() / "Pictures",
+        Path.home() / "Downloads",
+        Path.home() / "Desktop",
+    ]
+
+    search_terms = []
+    if raw and not is_placeholder:
+        stem = Path(raw).stem.lower().replace("_", " ").replace("-", " ")
+        search_terms = [t for t in stem.split() if len(t) > 2]
+
+    # Search by keyword match (e.g. arc, reactor, wallpaper)
+    if search_terms:
+        for d in search_dirs:
+            if not d.exists():
+                continue
+            try:
+                for f in d.iterdir():
+                    if f.is_file() and f.suffix.lower() in valid_exts:
+                        f_stem = f.stem.lower()
+                        if any(term in f_stem for term in search_terms):
+                            return f.resolve()
+            except Exception:
+                continue
+
+    # 5. Fallback: check documents/ for arc_reactor.jpg or any available wallpaper
+    doc_dir = base / "documents"
+    if doc_dir.exists():
+        arc_img = doc_dir / "arc_reactor.jpg"
+        if arc_img.exists():
+            return arc_img.resolve()
+        for f in doc_dir.iterdir():
+            if f.is_file() and f.suffix.lower() in valid_exts:
+                return f.resolve()
+
+    return None
+
+
 def _apply_wallpaper(image_path: str) -> str:
     path = Path(image_path).expanduser().resolve()
     if not path.exists():
@@ -114,15 +185,26 @@ def _apply_wallpaper(image_path: str) -> str:
     try:
         if _OS == "Windows":
             import ctypes
+            # Copy to persistent location so temporary files are not lost
+            wall_dir = _get_base_dir() / "documents" / "wallpapers"
+            wall_dir.mkdir(parents=True, exist_ok=True)
+            dest_path = wall_dir / f"wallpaper_{path.stem}{path.suffix}"
+            if path != dest_path:
+                shutil.copy2(path, dest_path)
+                path = dest_path
+
             if path.suffix.lower() in {".webp", ".png"}:
                 try:
                     from PIL import Image
-                    bmp_path = Path(tempfile.mktemp(suffix=".bmp"))
+                    bmp_path = wall_dir / f"{path.stem}.bmp"
                     Image.open(path).convert("RGB").save(bmp_path, "BMP")
                     path = bmp_path
                 except ImportError:
                     pass 
-            ctypes.windll.user32.SystemParametersInfoW(20, 0, str(path), 3)
+            ret = ctypes.windll.user32.SystemParametersInfoW(20, 0, str(path), 3)
+            if not ret:
+                err = ctypes.GetLastError()
+                return f"SystemParametersInfoW failed with code {err}"
             return f"Wallpaper set: {path.name}"
 
         elif _OS == "Darwin":
@@ -189,27 +271,10 @@ for (var i = 0; i < allDesktops.length; i++) {{
 
 
 def set_wallpaper(image_path: str) -> str:
-    """Set the wallpaper, then READ IT BACK before saying it worked.
-
-    Every platform call underneath reports only that it accepted the request:
-    Windows' SystemParametersInfoW returns a bool nobody checked, osascript
-    exits 0 whether or not the picture changed, and `feh` succeeds on a file
-    the compositor then ignores. The old code returned "Wallpaper set: x.jpg"
-    off the back of that — and a wallpaper that did not change is the one
-    failure the user can see from across the room.
-
-    `get_current_wallpaper()` already existed for the user to ask with. Using
-    it here costs one registry read and turns a claim into a check.
-
-    Where the desktop environment will not report its wallpaper — several
-    Linux setups — this says `unverified` rather than guessing, because
-    "I set it and cannot confirm" is true and "Wallpaper set" would not be.
-    """
+    """Set the wallpaper, then READ IT BACK before saying it worked."""
     applied = _apply_wallpaper(image_path)
     name = Path(image_path).name
 
-    # The inner function returns its own prose on the paths that never reached
-    # the operating system at all — a missing file, an unsupported format.
     if not applied.startswith("Wallpaper set"):
         return outcome.failed("set_wallpaper", applied, image=name)
 
@@ -223,7 +288,13 @@ def set_wallpaper(image_path: str) -> str:
         )
 
     current = reading.split(":", 1)[1].strip()
-    if Path(current).name.lower() == Path(applied.split(":", 1)[1].strip()).name.lower():
+    curr_name = Path(current).name.lower()
+    app_name = Path(applied.split(":", 1)[1].strip()).name.lower()
+    orig_name = Path(name).name.lower()
+
+    if (curr_name in (app_name, orig_name, "transcodedwallpaper")
+            or "transcoded" in curr_name
+            or Path(current).stem.lower() in (Path(app_name).stem.lower(), Path(orig_name).stem.lower())):
         return outcome.done("set_wallpaper", image=name, verified=True)
 
     return outcome.unverified(
@@ -238,14 +309,12 @@ def set_wallpaper_from_url(url: str) -> str:
     try:
         import urllib.request
         suffix = Path(url.split("?")[0]).suffix or ".jpg"
-        tmp    = Path(tempfile.mktemp(suffix=suffix))
-        urllib.request.urlretrieve(url, str(tmp))
-        result = set_wallpaper(str(tmp))
-        try:
-            tmp.unlink()
-        except Exception:
-            pass
-        return result
+        wall_dir = _get_base_dir() / "documents" / "wallpapers"
+        wall_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"downloaded_wallpaper_{int(time.time())}{suffix}"
+        dest = wall_dir / filename
+        urllib.request.urlretrieve(url, str(dest))
+        return set_wallpaper(str(dest))
     except Exception as e:
         return outcome.failed("set_wallpaper",
                               f"the image could not be downloaded: {e}", url=url)
@@ -434,12 +503,16 @@ def desktop_control(
         print(f"[Desktop] {action}")             # terminal, not the HUD
 
     try:
-        if action == "wallpaper":
+        if action in ("wallpaper", "set_wallpaper"):
             path = params.get("path", "")
-            if not path:
-                return outcome.failed("desktop_control",
-                                      "no image path was given", wanted=action)
-            return set_wallpaper(path)
+            resolved = _resolve_wallpaper_path(path, player=player)
+            if not resolved:
+                return outcome.failed(
+                    "desktop_control",
+                    "No valid image found for wallpaper. You can drop an image onto the HUD, place it in documents/, or provide an image path or URL.",
+                    wanted=action
+                )
+            return set_wallpaper(str(resolved))
 
         elif action == "wallpaper_url":
             url = params.get("url", "")

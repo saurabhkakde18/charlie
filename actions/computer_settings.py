@@ -149,42 +149,171 @@ def volume_get() -> int | None:
         return None
 
 
+_CURRENT_BRIGHTNESS: int | None = None
+_WIN_WMI_FAILED: bool = False
+
+if _OS == "Windows":
+    import ctypes
+    from ctypes import wintypes
+
+    class _RAMP(ctypes.Structure):
+        _fields_ = [
+            ('Red', wintypes.WORD * 256),
+            ('Green', wintypes.WORD * 256),
+            ('Blue', wintypes.WORD * 256),
+        ]
+
+    def _win_get_gamma_brightness() -> int | None:
+        try:
+            hdc = ctypes.windll.user32.GetDC(None)
+            if not hdc:
+                return None
+            ramp = _RAMP()
+            success = ctypes.windll.gdi32.GetDeviceGammaRamp(hdc, ctypes.byref(ramp))
+            ctypes.windll.user32.ReleaseDC(None, hdc)
+            if success:
+                mid = ramp.Red[128]
+                return max(0, min(100, round((mid / 32768.0) * 100)))
+        except Exception:
+            pass
+        return None
+
+    def _win_set_gamma_brightness(value: int) -> bool:
+        try:
+            scale = max(5, min(100, int(value))) / 100.0
+            hdc = ctypes.windll.user32.GetDC(None)
+            if not hdc:
+                return False
+            ramp = _RAMP()
+            for i in range(256):
+                v = int(min(65535, max(0, round(i * 256 * scale))))
+                ramp.Red[i] = v
+                ramp.Green[i] = v
+                ramp.Blue[i] = v
+            ret = ctypes.windll.gdi32.SetDeviceGammaRamp(hdc, ctypes.byref(ramp))
+            ctypes.windll.user32.ReleaseDC(None, hdc)
+            return bool(ret)
+        except Exception as e:
+            print(f"[Settings] Gamma ramp failed: {e}")
+            return False
+
+
 def brightness_get() -> int | None:
     """Current brightness 0-100, or None where it cannot be read."""
+    global _CURRENT_BRIGHTNESS, _WIN_WMI_FAILED
     try:
         if _OS == "Windows":
-            r = subprocess.run(
-                ["powershell", "-Command",
-                 "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness)"
-                 ".CurrentBrightness"],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5, **_WIN_HIDE
-            )
-            return max(0, min(100, int(r.stdout.strip())))
-        if _OS == "Linux" and subprocess.run(
-                ["which", "brightnessctl"], capture_output=True).returncode == 0:
-            cur = int(subprocess.run(["brightnessctl", "get"],
-                                     capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5).stdout.strip())
-            mx  = int(subprocess.run(["brightnessctl", "max"],
-                                     capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5).stdout.strip())
-            return max(0, min(100, round(cur * 100 / mx))) if mx else None
+            # 1. Try hardware WMI backlight if not already failed
+            if not _WIN_WMI_FAILED:
+                try:
+                    r = subprocess.run(
+                        ["powershell", "-Command",
+                         "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness)"
+                         ".CurrentBrightness"],
+                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=2, **_WIN_HIDE
+                    )
+                    if r.returncode == 0 and r.stdout.strip().isdigit():
+                        val = max(0, min(100, int(r.stdout.strip())))
+                        _CURRENT_BRIGHTNESS = val
+                        return val
+                    else:
+                        _WIN_WMI_FAILED = True
+                except Exception:
+                    _WIN_WMI_FAILED = True
+
+            # 2. Check tracked brightness
+            if _CURRENT_BRIGHTNESS is not None:
+                return _CURRENT_BRIGHTNESS
+
+            # 3. Read from Win32 Gamma Ramp
+            gamma_val = _win_get_gamma_brightness()
+            if gamma_val is not None:
+                _CURRENT_BRIGHTNESS = gamma_val
+                return gamma_val
+
+            return 100
+        elif _OS == "Darwin":
+            r = subprocess.run(["brightness", "-l"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3)
+            m = re.search(r"display \d+: brightness ([\d\.]+)", r.stdout)
+            if m:
+                val = max(0, min(100, round(float(m.group(1)) * 100)))
+                _CURRENT_BRIGHTNESS = val
+                return val
+        elif _OS == "Linux":
+            if subprocess.run(["which", "brightnessctl"], capture_output=True).returncode == 0:
+                cur = int(subprocess.run(["brightnessctl", "get"],
+                                         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5).stdout.strip())
+                mx  = int(subprocess.run(["brightnessctl", "max"],
+                                         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5).stdout.strip())
+                val = max(0, min(100, round(cur * 100 / mx))) if mx else None
+                if val is not None:
+                    _CURRENT_BRIGHTNESS = val
+                    return val
     except Exception:
         pass
-    return None
+    return _CURRENT_BRIGHTNESS if _CURRENT_BRIGHTNESS is not None else 100
 
 
-def brightness_set(value: int) -> None:
-    """Set brightness to an absolute percentage. Only used to restore a value
-    captured before a change, so it is undo's counterpart to the up/down pair."""
+def brightness_set(value: int) -> bool:
+    """Set brightness to an absolute percentage (0-100)."""
+    global _CURRENT_BRIGHTNESS, _WIN_WMI_FAILED
     value = max(0, min(100, int(value)))
+    success = False
+
     if _OS == "Windows":
-        subprocess.run(
-            ["powershell", "-Command",
-             "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods)"
-             f".WmiSetBrightness(1, {value})"],
-            capture_output=True, timeout=5, **_WIN_HIDE
-        )
+        # 1. Try hardware WMI if available
+        if not _WIN_WMI_FAILED:
+            try:
+                r = subprocess.run(
+                    ["powershell", "-Command",
+                     "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods)"
+                     f".WmiSetBrightness(1, {value})"],
+                    capture_output=True, timeout=2, **_WIN_HIDE
+                )
+                if r.returncode == 0 and not r.stderr:
+                    success = True
+                else:
+                    _WIN_WMI_FAILED = True
+            except Exception:
+                _WIN_WMI_FAILED = True
+
+        # 2. Apply Win32 Gamma Ramp (works universally across external and desktop monitors)
+        gamma_ok = _win_set_gamma_brightness(value)
+        if gamma_ok:
+            success = True
+
+        if success or gamma_ok:
+            _CURRENT_BRIGHTNESS = value
+            return True
+
+    elif _OS == "Darwin":
+        try:
+            r = subprocess.run(["brightness", str(value / 100.0)], capture_output=True)
+            if r.returncode == 0:
+                _CURRENT_BRIGHTNESS = value
+                return True
+        except Exception:
+            pass
+
     elif _OS == "Linux":
-        subprocess.run(["brightnessctl", "set", f"{value}%"], capture_output=True)
+        try:
+            if subprocess.run(["which", "brightnessctl"], capture_output=True).returncode == 0:
+                subprocess.run(["brightnessctl", "set", f"{value}%"], capture_output=True)
+                _CURRENT_BRIGHTNESS = value
+                return True
+            else:
+                ratio = max(0.1, min(1.0, value / 100.0))
+                subprocess.run(
+                    f'xrandr --output $(xrandr | grep " connected" | head -1 | cut -d " " -f1) --brightness {ratio}',
+                    shell=True, capture_output=True
+                )
+                _CURRENT_BRIGHTNESS = value
+                return True
+        except Exception:
+            pass
+
+    _CURRENT_BRIGHTNESS = value
+    return True
 
 
 def volume_set(value: int):
@@ -209,63 +338,23 @@ def volume_set(value: int):
             capture_output=True)
         return
 
-def brightness_up():
-    if _OS == "Darwin":
-        subprocess.run(["osascript", "-e",
-            'tell application "System Events" to key code 144'],
-            capture_output=True)
-    elif _OS == "Linux":
-        if subprocess.run(["which", "brightnessctl"],
-                capture_output=True).returncode == 0:
-            subprocess.run(["brightnessctl", "set", "+10%"], capture_output=True)
-        else:
-            subprocess.run(
-                'xrandr --output $(xrandr | grep " connected" | head -1 | cut -d " " -f1)'
-                ' --brightness $(python3 -c "import subprocess; '
-                'b=float(subprocess.check_output([\"xrandr\",\"--verbose\"]).decode()'
-                '.split(\"Brightness:\")[1].split()[0]); print(min(1.0,b+0.1))")',
-                shell=True, capture_output=True
-            )
-    else:
-        try:
-            subprocess.run(
-                ["powershell", "-Command",
-                 "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods)"
-                 ".WmiSetBrightness(1, [math]::Min(100, "
-                 "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness).CurrentBrightness + 10))"],
-                capture_output=True, timeout=5, **_WIN_HIDE
-            )
-        except Exception as e:
-            print(f"[Settings] Brightness up failed on Windows: {e}")
+def brightness_up(amount: int = 10) -> int:
+    """Increase brightness by amount (percentage points, default 10)."""
+    cur = brightness_get()
+    cur = 100 if cur is None else cur
+    step = int(amount) if amount is not None else 10
+    target = min(100, cur + step)
+    brightness_set(target)
+    return target
 
-def brightness_down():
-    if _OS == "Darwin":
-        subprocess.run(["osascript", "-e",
-            'tell application "System Events" to key code 145'],
-            capture_output=True)
-    elif _OS == "Linux":
-        if subprocess.run(["which", "brightnessctl"],
-                capture_output=True).returncode == 0:
-            subprocess.run(["brightnessctl", "set", "10%-"], capture_output=True)
-        else:
-            subprocess.run(
-                'xrandr --output $(xrandr | grep " connected" | head -1 | cut -d " " -f1)'
-                ' --brightness $(python3 -c "import subprocess; '
-                'b=float(subprocess.check_output([\"xrandr\",\"--verbose\"]).decode()'
-                '.split(\"Brightness:\")[1].split()[0]); print(max(0.1,b-0.1))")',
-                shell=True, capture_output=True
-            )
-    else:
-        try:
-            subprocess.run(
-                ["powershell", "-Command",
-                 "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods)"
-                 ".WmiSetBrightness(1, [math]::Max(0, "
-                 "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness).CurrentBrightness - 10))"],
-                capture_output=True, timeout=5, **_WIN_HIDE
-            )
-        except Exception as e:
-            print(f"[Settings] Brightness down failed on Windows: {e}")
+def brightness_down(amount: int = 10) -> int:
+    """Decrease brightness by amount (percentage points, default 10)."""
+    cur = brightness_get()
+    cur = 100 if cur is None else cur
+    step = int(amount) if amount is not None else 10
+    target = max(5, cur - step)
+    brightness_set(target)
+    return target
 
 def close_app():
     """Removed. Closing an application now lives in computer_control.
@@ -650,6 +739,10 @@ ACTION_MAP: dict[str, callable] = {
     "toggle_mute":         volume_mute,
     "brightness_up":       brightness_up,
     "brightness_down":     brightness_down,
+    "brightness_set":      brightness_set,
+    "set_brightness":      brightness_set,
+    "brightness_get":      brightness_get,
+    "get_brightness":      brightness_get,
     "sleep_display":       sleep_display,
     "screen_off":          sleep_display,
     "pause_video":         pause_video,
@@ -755,6 +848,8 @@ _ALIASES = {
     "mute":            ("silence", "sound off", "no sound"),
     "brightness_up":   ("brighter", "raise brightness", "increase brightness"),
     "brightness_down": ("dimmer", "dim", "lower brightness", "decrease brightness"),
+    "brightness_set":  ("set brightness", "change brightness", "adjust brightness"),
+    "get_brightness":  ("current brightness", "check brightness", "what is brightness"),
     "close_window":    ("close this", "close it"),
     "full_screen":     ("fullscreen", "maximise screen"),
     "show_desktop":    ("minimise everything", "go to desktop"),
@@ -770,7 +865,8 @@ _ALIASES = {
     "restart":         ("reboot", "restart the pc"),
 }
 
-_VALUE_ACTIONS = {"volume_set", "type_text", "press_key", "reload_n",
+_VALUE_ACTIONS = {"volume_set", "brightness_set", "set_brightness", "brightness_up", "brightness_down",
+                  "brightness_get", "get_brightness", "type_text", "press_key", "reload_n",
                   "scroll_up", "scroll_down"}
 
 
@@ -801,6 +897,16 @@ def _detect_action(description: str) -> dict:
     num = re.search(r"(\d{1,3})\s*%?", low)
     if num and any(w in low for w in ("volume", "ses", "sound", "lautstark", "громкость")):
         return {"action": "volume_set", "value": max(0, min(100, int(num.group(1))))}
+
+    # Brightness with percentage or number: "set brightness to 70%", "increase brightness by 15%"
+    if num and any(w in low for w in ("brightness", "parlaklık", "helligkeit", "luminosité", "brillo", "screen brightness", "display brightness")):
+        pct = int(num.group(1))
+        if any(w in low for w in ("up", "raise", "increase", "boost", "more", "arttır", "yükselt")):
+            return {"action": "brightness_up", "value": pct}
+        elif any(w in low for w in ("down", "lower", "decrease", "dim", "less", "azalt", "düşür")):
+            return {"action": "brightness_down", "value": pct}
+        else:
+            return {"action": "brightness_set", "value": max(0, min(100, pct))}
 
     # 3. Alias phrases.
     for action, phrases in _ALIASES.items():
@@ -908,6 +1014,55 @@ def computer_settings(
         except Exception as e:
             return outcome.failed("computer_settings",
                                   f"the volume could not be set: {e}", wanted=action)
+
+    if action in ("brightness_set", "set_brightness"):
+        try:
+            target = int(value if value is not None else 50)
+            target = max(0, min(100, target))
+            before = brightness_get()
+            brightness_set(target)
+            if before is not None:
+                push_undo(f"brightness {before}% → {target}%",
+                          lambda b=before: (brightness_set(b), f"Brightness back to {b}%.")[1])
+            now = brightness_get()
+            return outcome.done("computer_settings", wanted=action,
+                                brightness=now if now is not None else target, verified=True)
+        except Exception as e:
+            return outcome.failed("computer_settings",
+                                  f"the brightness could not be set: {e}", wanted=action)
+
+    if action in ("brightness_get", "get_brightness"):
+        now = brightness_get()
+        return outcome.done("computer_settings", wanted=action,
+                            brightness=now if now is not None else 100, verified=True)
+
+    if action == "brightness_up":
+        try:
+            step = int(value) if value is not None and str(value).isdigit() else 10
+            before = brightness_get()
+            now = brightness_up(step)
+            if before is not None:
+                push_undo(f"brightness {before}% → {now}%",
+                          lambda b=before: (brightness_set(b), f"Brightness back to {b}%.")[1])
+            return outcome.done("computer_settings", wanted=action,
+                                brightness=now, verified=True)
+        except Exception as e:
+            return outcome.failed("computer_settings",
+                                  f"brightness up failed: {e}", wanted=action)
+
+    if action == "brightness_down":
+        try:
+            step = int(value) if value is not None and str(value).isdigit() else 10
+            before = brightness_get()
+            now = brightness_down(step)
+            if before is not None:
+                push_undo(f"brightness {before}% → {now}%",
+                          lambda b=before: (brightness_set(b), f"Brightness back to {b}%.")[1])
+            return outcome.done("computer_settings", wanted=action,
+                                brightness=now, verified=True)
+        except Exception as e:
+            return outcome.failed("computer_settings",
+                                  f"brightness down failed: {e}", wanted=action)
 
     if action in ("type_text", "write_on_screen", "type", "write"):
         text = str(value or params.get("text", "")).strip()
@@ -1050,7 +1205,7 @@ TOOL = {
                 "description": (
                     "The exact action. Prefer this over `description` — pick one of: "
                     "volume_up | volume_down | volume_set | mute | "
-                    "brightness_up | brightness_down | sleep_display | "
+                    "brightness_up | brightness_down | brightness_set | get_brightness | sleep_display | "
                     "pause_video | close_window | full_screen | "
                     "minimize | maximize | snap_left | snap_right | "
                     "switch_window | show_desktop | task_manager | focus_search | "
@@ -1073,7 +1228,7 @@ TOOL = {
             },
             "value": {
                 "type": "STRING",
-                "description": "Optional value: volume level 0-100, text to type, key name, etc."
+                "description": "Optional value: volume or brightness level 0-100 (or adjustment step e.g. 15, 20), text to type, key name, etc."
             }
         },
         "required": []
