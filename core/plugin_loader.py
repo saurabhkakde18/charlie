@@ -105,12 +105,28 @@ class PluginRegistry:
                 decls.append(decl)
         return decls
 
+    def resolve_name(self, name: str) -> Optional[str]:
+        """Resolve exact or fuzzy matching for plugin names."""
+        if not name:
+            return None
+        if name in self._plugins and get_plugin_enabled(name):
+            return name
+        clean = name.lower().replace("_", "").replace("-", "")
+        for plug in self._plugins:
+            if plug.lower().replace("_", "").replace("-", "") == clean and get_plugin_enabled(plug):
+                return plug
+        import difflib
+        active_names = [p for p in self._plugins if get_plugin_enabled(p)]
+        matches = difflib.get_close_matches(name, active_names, n=1, cutoff=0.75)
+        return matches[0] if matches else None
+
     def has(self, name: str) -> bool:
-        return name in self._plugins
+        return self.resolve_name(name) is not None
 
     def scheduling(self, name: str) -> Optional[str]:
         """How this plugin's result should re-enter the conversation, if it said."""
-        rec = self._plugins.get(name)
+        resolved = self.resolve_name(name)
+        rec = self._plugins.get(resolved) if resolved else None
         return rec.scheduling if rec else None
 
     # -- called by main.py from _execute_tool's else branch --

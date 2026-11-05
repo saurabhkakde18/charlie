@@ -142,12 +142,27 @@ class ActionRegistry:
             out.append(decl)
         return out
 
+    def resolve_name(self, name: str) -> Optional[str]:
+        """Resolve exact or fuzzy matching for action names."""
+        if not name:
+            return None
+        if name in self._actions:
+            return name
+        clean = name.lower().replace("_", "").replace("-", "")
+        for act in self._actions:
+            if act.lower().replace("_", "").replace("-", "") == clean:
+                return act
+        import difflib
+        matches = difflib.get_close_matches(name, list(self._actions.keys()), n=1, cutoff=0.75)
+        return matches[0] if matches else None
+
     def has(self, name: str) -> bool:
-        return name in self._actions
+        return self.resolve_name(name) is not None
 
     def scheduling(self, name: str) -> Optional[str]:
         """How this action's result should re-enter the conversation, if it said."""
-        rec = self._actions.get(name)
+        resolved = self.resolve_name(name)
+        rec = self._actions.get(resolved) if resolved else None
         return rec.scheduling if rec else None
 
     def names(self) -> set[str]:
@@ -155,7 +170,8 @@ class ActionRegistry:
 
     # -- called by main.py from _execute_tool --
     def run(self, name: str, parameters: dict, ctx: dict | None = None) -> str:
-        rec = self._actions.get(name)
+        resolved = self.resolve_name(name)
+        rec = self._actions.get(resolved) if resolved else None
         if rec is None or not rec.valid:
             return f"Action '{name}' is not available."
         try:
