@@ -345,6 +345,28 @@ def _process_data(path: Path, file_type: str, action: str,
         except Exception as e:
             return f"Stats failed: {e}"
 
+    if action in ("dashboard", "visualize", "visuals", "chart", "charts"):
+        try:
+            from core.dashboard_generator import create_and_open_dashboard
+            title = params.get("title") or f"{path.stem.replace('_', ' ').title()} Dashboard"
+            out_file = path.parent / f"{path.stem}_dashboard.html"
+            saved_path, summary = create_and_open_dashboard(
+                df=df,
+                output_path=out_file,
+                title=title,
+                source_name=path.name,
+                auto_open=True,
+            )
+            kpi_preview = ", ".join(f"{k['label']}: {k['value']}" for k in summary.get("kpis", [])[:3])
+            return (
+                f"Interactive visual dashboard generated and opened in browser: {saved_path.name}\n"
+                f"Metrics: {kpi_preview}\n"
+                f"Total Records: {summary['total_rows']:,} | Charts: {len(summary.get('charts', []))}\n"
+                f"File: {saved_path}"
+            )
+        except Exception as e:
+            return f"Dashboard generation failed: {e}"
+
     if action == "analyze":
         preview = df.head(50).to_string()
         prompt  = (f"Analyze this dataset. Columns: {list(df.columns)}\n"
@@ -868,7 +890,7 @@ TOOL = {
             },
             "action": {
                 "type": "STRING",
-                "description": "What to do with the file. Examples by type:\nimage: describe | ocr | resize | compress | convert | info\npdf: summarize | extract_text | to_word | info\ndocx/txt: summarize | fix | reformat | translate_hint | word_count | to_bullet\ncsv/excel: analyze | stats | filter | sort | convert | info\njson: validate | format | analyze | to_csv\ncode: explain | review | fix | optimize | run | document | test\naudio: transcribe | trim | convert | info\nvideo: trim | extract_audio | extract_frame | compress | transcribe | info | convert\narchive: list | extract\npptx: summarize | extract_text | analyze"
+                "description": "What to do with the file. Examples by type:\nimage: describe | ocr | resize | compress | convert | info\npdf: summarize | extract_text | to_word | info\ndocx/txt: summarize | fix | reformat | translate_hint | word_count | to_bullet\ncsv/excel: dashboard | visualize | analyze | stats | filter | sort | convert | info\njson: validate | format | analyze | to_csv\ncode: explain | review | fix | optimize | run | document | test\naudio: transcribe | trim | convert | info\nvideo: trim | extract_audio | extract_frame | compress | transcribe | info | convert\narchive: list | extract\npptx: summarize | extract_text | analyze"
             },
             "instruction": {
                 "type": "STRING",

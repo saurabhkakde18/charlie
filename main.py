@@ -1475,6 +1475,8 @@ class JarvisLive:
 
             else:
                 if self._plugin_registry.has(name):
+                    if not args.get("file_path") and self.ui.current_file:
+                        args["file_path"] = self.ui.current_file
                     r = await loop.run_in_executor(
                         None,
                         lambda: self._plugin_registry.run(name, args, player=self.ui, session_memory=None)
