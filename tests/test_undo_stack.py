@@ -56,3 +56,4 @@ def test_undo_stack_max_depth():
         # Oldest dropped, newest kept
         assert undo._stack[-1].label == "Action 14"
         assert undo._stack[0].label == "Action 5"
+

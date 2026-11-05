@@ -97,3 +97,4 @@ def test_ladder_simulation_429_503_404():
     # Clean up
     with gemini._cool_lock:
         gemini._cooldown.clear()
+

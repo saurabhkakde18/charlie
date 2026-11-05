@@ -39,3 +39,4 @@ def test_action_registry_fuzzy_matching():
     assert reg.resolve_name("totally_nonexistent_action") is None
     assert not reg.has("totally_nonexistent_action")
     assert "not available" in reg.run("totally_nonexistent_action", {})
+

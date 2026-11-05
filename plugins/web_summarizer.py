@@ -94,3 +94,4 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         player.write_log(f"Charlie: Summarized {domain}.")
 
     return f"Summary of {domain}:\n{summary}"
+

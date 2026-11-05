@@ -97,3 +97,4 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         detail=f"Charlie is requesting to run:\n\n{cmd}\n\nApprove execution?",
         run=lambda: _execute(cmd),
     )
+

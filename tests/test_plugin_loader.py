@@ -58,3 +58,4 @@ PLUGIN = { unclosed syntax
     assert "no_run_tool" not in names
     assert "no_dict_plugin" not in names
     assert "syntax_err_plugin" not in names
+

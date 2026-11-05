@@ -91,3 +91,4 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         player.write_log(f"Charlie: Inspected screen.")
 
     return desc
+

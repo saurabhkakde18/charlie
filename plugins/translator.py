@@ -61,3 +61,4 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         player.write_log(f"Charlie: [{target_lang}] {translated}")
 
     return f"In {target_lang}: {translated}"
+
