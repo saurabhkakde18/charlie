@@ -56,18 +56,23 @@ MAX_UPLOAD_MB = 500
 
 
 def _make_uploads_dir() -> Path:
-    """Return (and create) the cross-platform uploads folder."""
+    """Return (and create) the cross-platform uploads folder that is guaranteed writable."""
     for candidate in [
+        BASE_DIR / "uploads",
         Path.home() / "Downloads" / "Charlie Uploads",
         Path.home() / "Documents" / "Charlie Uploads",
-        BASE_DIR / "uploads",
     ]:
         try:
             candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / f".probe_{secrets.token_hex(4)}"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
             return candidate
         except Exception:
             pass
-    return BASE_DIR / "uploads"
+    fallback = BASE_DIR / "uploads"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
 
 
 UPLOADS_DIR = _make_uploads_dir()
@@ -970,7 +975,9 @@ class DashboardServer:
         async def device_login_ep(req: Request):
             """Return a fresh auth token for a previously paired device token."""
             try:
-                body = await req.json()
+                body = getattr(req, "_mock_json", None)
+                if body is None:
+                    body = await req.json()
             except Exception:
                 return JSONResponse({"ok": False}, status_code=400)
             dev_tok = (body.get("device_token") or "").strip()
@@ -1145,16 +1152,120 @@ class DashboardServer:
             return JSONResponse({"files": files})
 
         @app.get("/uploads/{filename}")
-        async def download_file(filename: str, token: str = ""):
-            # Auth via query param — browser <a download> can't send custom headers
+        async def download_file(filename: str, req: Request, token: str = ""):
+            # Auth via query param or Authorization header
             tok = token.strip()
+            if not tok:
+                tok = req.headers.get("authorization", "").removeprefix("Bearer ").strip()
             if not _valid(tok):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
-            safe = Path(filename).name
+            safe = _safe_filename(filename)
             path = (self._uploads_dir / safe).resolve()
             if not path.is_relative_to(self._uploads_dir.resolve()) or not path.is_file():
                 return JSONResponse({"error": "Not found"}, status_code=404)
-            return FileResponse(str(path), filename=safe)
+
+            ext = path.suffix.lower()
+            media_type = "application/pdf" if ext == ".pdf" else None
+            headers = {
+                "Content-Disposition": f'attachment; filename="{safe}"',
+                "Access-Control-Expose-Headers": "Content-Disposition",
+            }
+            return FileResponse(
+                str(path),
+                filename=safe,
+                media_type=media_type,
+                content_disposition_type="attachment",
+                headers=headers,
+            )
+
+        @app.post("/api/generate-pdf")
+        async def generate_pdf_ep(req: Request):
+            """Generate a PDF document on the fly from text, markdown, or tabular data."""
+            tok = req.headers.get("authorization", "").removeprefix("Bearer ").strip()
+            if not tok:
+                tok = req.query_params.get("token", "").strip()
+            if not _valid(tok):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+            try:
+                body = getattr(req, "_mock_json", None)
+                if body is None:
+                    body = await req.json()
+            except Exception:
+                return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+            title = str(body.get("title") or "Document").strip()
+            content = body.get("content", "")
+            doc_format = str(body.get("format") or "markdown").lower().strip()
+            raw_filename = str(body.get("filename") or f"{title}.pdf").strip()
+            if not raw_filename.lower().endswith(".pdf"):
+                raw_filename += ".pdf"
+            safe_name = _safe_filename(raw_filename)
+
+            dest = self._uploads_dir / safe_name
+            stem, suffix = Path(safe_name).stem, Path(safe_name).suffix
+            counter = 1
+            while dest.exists():
+                dest = self._uploads_dir / f"{stem}_{counter}{suffix}"
+                counter += 1
+
+            try:
+                from core import pdf_generator
+                if doc_format in ("table", "csv"):
+                    headers = body.get("headers") or []
+                    rows = body.get("rows") or []
+                    pdf_generator.generate_pdf_from_table(
+                        title=title,
+                        headers=headers,
+                        rows=rows,
+                        output_path=dest,
+                        summary=str(body.get("summary") or ""),
+                    )
+                elif doc_format == "text":
+                    pdf_generator.generate_pdf_from_text(
+                        title=title,
+                        text=str(content),
+                        output_path=dest,
+                    )
+                else:  # default markdown
+                    pdf_generator.generate_pdf_from_markdown(
+                        title=title,
+                        md_text=str(content),
+                        output_path=dest,
+                    )
+
+                try:
+                    b_coro = self.broadcast({
+                        "type": "file_received",
+                        "name": dest.name,
+                        "size": dest.stat().st_size,
+                        "saved_to": str(self._uploads_dir),
+                    })
+                    asyncio.create_task(b_coro)
+                except Exception:
+                    b_coro.close()
+
+                # Direct download or JSON response with download url
+                if body.get("download", False) or req.headers.get("accept") == "application/pdf":
+                    return FileResponse(
+                        str(dest),
+                        filename=dest.name,
+                        media_type="application/pdf",
+                        content_disposition_type="attachment",
+                        headers={
+                            "Content-Disposition": f'attachment; filename="{dest.name}"',
+                            "Access-Control-Expose-Headers": "Content-Disposition",
+                        },
+                    )
+
+                return JSONResponse({
+                    "ok": True,
+                    "name": dest.name,
+                    "size": dest.stat().st_size,
+                    "download_url": f"/uploads/{dest.name}?token={tok}",
+                })
+            except Exception as e:
+                return JSONResponse({"error": f"PDF generation failed: {e}"}, status_code=500)
 
         @app.websocket("/ws")
         async def ws_ep(websocket: WebSocket, token: str = ""):

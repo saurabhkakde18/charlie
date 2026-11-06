@@ -94,6 +94,7 @@ ddgs>=9,<10                  # web_search — the maintained successor to
 pdfplumber                   # file_processor — PDF text and tables
 PyPDF2                       # file_processor — PDF fallback reader
 python-docx                  # file_processor — .docx reading
+reportlab>=4.0,<6            # pdf_generator & file_processor — PDF document creation
 pynvml                       # system_monitor + the HUD's GPU meter (NVIDIA)
 
 # ── Optional: heavy extras, install only if you want the feature ──────────────

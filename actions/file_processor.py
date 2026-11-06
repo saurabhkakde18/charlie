@@ -141,6 +141,15 @@ def _process_image(path: Path, action: str, params: dict, speak=None) -> str:
         except Exception as e:
             return f"Resize failed: {e}"
 
+    if action in ("to_pdf", "pdf") or (action == "convert" and params.get("format", "").lower().strip(".") == "pdf"):
+        try:
+            from core import pdf_generator
+            out = _output_path(path, "converted", ".pdf")
+            pdf_generator.convert_image_to_pdf(path, out, title=path.stem.replace("_", " ").title())
+            return f"Converted image to PDF ({_file_size_str(out)}). Saved: {out.name}"
+        except Exception as e:
+            return f"Convert to PDF failed: {e}"
+
     if action == "convert":
         fmt = params.get("format", "png").lower().strip(".")
         fmt_map = {"jpg": "JPEG", "jpeg": "JPEG", "png": "PNG",
@@ -251,7 +260,38 @@ def _process_pdf(path: Path, action: str, params: dict, speak=None) -> str:
         except ImportError:
             return "python-docx not installed. Run: pip install python-docx"
 
-    return f"Unknown PDF action: '{action}'. Try: summarize, extract_text, info, to_word"
+    if action in ("extract_pages", "split_pages", "split"):
+        page_spec = str(params.get("pages") or params.get("page_range") or "1").strip()
+        try:
+            import PyPDF2
+            with open(path, "rb") as f:
+                reader = PyPDF2.PdfReader(f)
+                total = len(reader.pages)
+                writer = PyPDF2.PdfWriter()
+                selected = set()
+                for part in page_spec.split(","):
+                    part = part.strip()
+                    if "-" in part:
+                        start_s, end_s = part.split("-", 1)
+                        s = max(1, int(start_s))
+                        e = min(total, int(end_s))
+                        selected.update(range(s, e + 1))
+                    elif part.isdigit():
+                        p_num = int(part)
+                        if 1 <= p_num <= total:
+                            selected.add(p_num)
+                if not selected:
+                    selected = {1}
+                for p_num in sorted(selected):
+                    writer.add_page(reader.pages[p_num - 1])
+                out = _output_path(path, f"pages_{page_spec.replace(' ', '')}", ".pdf")
+                with open(out, "wb") as out_f:
+                    writer.write(out_f)
+                return f"Extracted {len(selected)} page(s) ({', '.join(str(p) for p in sorted(selected))}). Saved: {out.name}"
+        except Exception as e:
+            return f"Page extraction failed: {e}"
+
+    return f"Unknown PDF action: '{action}'. Try: summarize, extract_text, info, to_word, extract_pages"
 
 def _process_text_doc(path: Path, file_type: str, action: str,
                        params: dict, speak=None) -> str:
@@ -286,6 +326,21 @@ def _process_text_doc(path: Path, file_type: str, action: str,
             out.write_text(content, encoding="utf-8")
             return f"Text extracted. Saved: {out.name}"
         return content[:2000]
+
+    target_fmt = (params.get("format") or params.get("target_format") or "").lower().strip(".")
+    if action in ("to_pdf", "pdf", "export_pdf") or target_fmt == "pdf":
+        try:
+            from core import pdf_generator
+            out = _output_path(path, "converted", ".pdf")
+            if file_type == "docx":
+                pdf_generator.convert_docx_to_pdf(path, out)
+            elif path.suffix.lower() == ".md":
+                pdf_generator.generate_pdf_from_markdown(path.stem.replace("_", " ").title(), content, out)
+            else:
+                pdf_generator.generate_pdf_from_text(path.stem.replace("_", " ").title(), content, out)
+            return f"Exported document to PDF ({_file_size_str(out)}). Saved: {out.name}"
+        except Exception as e:
+            return f"PDF export failed: {e}"
 
     instruction = params.get("instruction", "")
     prompt_map  = {
@@ -327,7 +382,7 @@ def _process_data(path: Path, file_type: str, action: str,
 
     try:
         if file_type == "csv":
-            df = pd.read_csv(path, encoding="utf-8", errors="replace")
+            df = pd.read_csv(path, encoding="utf-8", encoding_errors="replace")
         else:
             df = pd.read_excel(path)
     except Exception as e:
@@ -378,6 +433,28 @@ def _process_data(path: Path, file_type: str, action: str,
             return response.text.strip()
         except Exception as e:
             return f"AI analysis failed: {e}"
+
+    target_fmt = (params.get("format") or params.get("target_format") or "").lower().strip(".")
+    if action in ("to_pdf", "pdf", "export_pdf") or (action == "convert" and target_fmt == "pdf"):
+        try:
+            from core import pdf_generator
+            out = _output_path(path, "report", ".pdf")
+            headers = [str(c) for c in df.columns]
+            max_rows = int(params.get("max_rows", 200))
+            rows = df.head(max_rows).values.tolist()
+            summary = f"Total records: {len(df):,} · Columns: {len(df.columns)}"
+            if len(df) > max_rows:
+                summary += f" (showing first {max_rows} rows)"
+            pdf_generator.generate_pdf_from_table(
+                title=params.get("title") or f"{path.stem.replace('_', ' ').title()} Report",
+                headers=headers,
+                rows=rows,
+                output_path=out,
+                summary=summary,
+            )
+            return f"Exported dataset to PDF report ({_file_size_str(out)}). Saved: {out.name}"
+        except Exception as e:
+            return f"PDF report export failed: {e}"
 
     if action in ("convert", "to_csv", "to_excel", "to_json"):
         fmt = {"to_csv": "csv", "to_excel": "xlsx", "to_json": "json",
@@ -786,6 +863,16 @@ def _process_pptx(path: Path, action: str, params: dict, speak=None) -> str:
         except ImportError:
             return "python-pptx not installed."
 
+    target_fmt = (params.get("format") or params.get("target_format") or "").lower().strip(".")
+    if action in ("to_pdf", "pdf", "export_pdf") or (action == "convert" and target_fmt == "pdf"):
+        try:
+            from core import pdf_generator
+            out = _output_path(path, "summary", ".pdf")
+            pdf_generator.convert_pptx_to_pdf(path, out)
+            return f"Converted presentation to PDF summary ({_file_size_str(out)}). Saved: {out.name}"
+        except Exception as e:
+            return f"PPTX to PDF conversion failed: {e}"
+
     if action in ("summarize", "extract_text", "analyze"):
         text = _read_pptx_text()
         if action == "extract_text":
@@ -800,7 +887,7 @@ def _process_pptx(path: Path, action: str, params: dict, speak=None) -> str:
         except Exception as e:
             return f"AI processing failed: {e}"
 
-    return f"Unknown PPTX action: '{action}'. Try: summarize, extract_text, analyze"
+    return f"Unknown PPTX action: '{action}'. Try: summarize, extract_text, analyze, to_pdf"
 
 from core import outcome
 
@@ -890,7 +977,7 @@ TOOL = {
             },
             "action": {
                 "type": "STRING",
-                "description": "What to do with the file. Examples by type:\nimage: describe | ocr | resize | compress | convert | info\npdf: summarize | extract_text | to_word | info\ndocx/txt: summarize | fix | reformat | translate_hint | word_count | to_bullet\ncsv/excel: dashboard | visualize | analyze | stats | filter | sort | convert | info\njson: validate | format | analyze | to_csv\ncode: explain | review | fix | optimize | run | document | test\naudio: transcribe | trim | convert | info\nvideo: trim | extract_audio | extract_frame | compress | transcribe | info | convert\narchive: list | extract\npptx: summarize | extract_text | analyze"
+                "description": "What to do with the file. Examples by type:\nimage: describe | ocr | resize | compress | convert | info | to_pdf\npdf: summarize | extract_text | to_word | extract_pages | info\ndocx/txt: summarize | fix | reformat | translate_hint | word_count | to_bullet | to_pdf\ncsv/excel: dashboard | visualize | analyze | stats | filter | sort | convert | to_pdf | info\njson: validate | format | analyze | to_csv\ncode: explain | review | fix | optimize | run | document | test\naudio: transcribe | trim | convert | info\nvideo: trim | extract_audio | extract_frame | compress | transcribe | info | convert\narchive: list | extract\npptx: summarize | extract_text | analyze | to_pdf"
             },
             "instruction": {
                 "type": "STRING",
